@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 #
-# This file is part of nautilus-imgur-uploader
+# This file is part of nautilus-twitter-uploader
 #
 # Copyright (C) 2016 Lorenzo Carbonell
 # lorenzo.carbonell.cerezo@gmail.com
@@ -24,6 +24,7 @@
 import gi
 try:
     gi.require_version('Gtk', '3.0')
+    gi.require_version('GdkPixbuf', '2.0')
     gi.require_version('Nautilus', '3.0')
     gi.require_version('WebKit', '3.0')
 except Exception as e:
@@ -38,32 +39,36 @@ from threading import Thread
 from urllib import unquote_plus
 from gi.repository import GObject
 from gi.repository import WebKit
+from gi.repository import GdkPixbuf
 from gi.repository import Gtk
 from gi.repository import GLib
 from gi.repository import Nautilus as FileManager
-
-from imgurpython import ImgurClient
+from TwitterAPI import TwitterAPI
+from requests_oauthlib import OAuth1Session
 import json
 import codecs
 import requests
 
-APP = 'nautilus-imgur-uploader'
-APPNAME = 'nautilus-imgur-uploader'
-ICON = 'nautilus-imgur-uploader'
+APP = 'nautilus-twitter-uploader'
+APPNAME = 'nautilus-twitter-uploader'
+ICON = 'nautilus-twitter-uploader'
 VERSION = '0.1.0'
 
 CONFIG_DIR = os.path.join(os.path.expanduser('~'), '.config')
 CONFIG_APP_DIR = os.path.join(CONFIG_DIR, APP)
 TOKEN_FILE = os.path.join(CONFIG_APP_DIR, 'token')
 
-CLIENT_ID = '674fadc274d0beb'
-CLIENT_SECTRET = '4fd4cdcd942ca2427dbbf8f7ce6ab6ea71abb78e'
+CLIENT_ID = '9yTpnri9pnnDgrcjv56TyQADD'
+CLIENT_SECTRET = 'S44foTOdsO5kY0sPYl0xTImbpoBW4F05He5uPR6O0cFku1CxhX'
+REQUEST_TOKEN_URL = 'https://api.twitter.com/oauth/request_token'
+ACCESS_TOKEN_URL = 'https://api.twitter.com/oauth/access_token'
+AUTHORIZATION_URL = 'https://api.twitter.com/oauth/authorize'
+SIGNIN_URL = 'https://api.twitter.com/oauth/authenticate'
 EXTENSIONS_FROM = ['.bmp', '.eps', '.gif', '.jpg', '.pcx', '.png', '.ppm',
                    '.tif', '.tiff', '.webp']
-SEPARATOR = u'\u2015' * 10
 PARAMS = {
-        'access_token': '',
-        'refresh_token': ''}
+        'access_token_key': '',
+        'access_token_secret': ''}
 _ = str
 
 
@@ -113,7 +118,9 @@ class LoginDialog(Gtk.Dialog):
 
         Gtk.Dialog.__init__(self, _('Login'), parent,
                             Gtk.DialogFlags.MODAL |
-                            Gtk.DialogFlags.DESTROY_WITH_PARENT)
+                            Gtk.DialogFlags.DESTROY_WITH_PARENT,
+                            (Gtk.STOCK_OK, Gtk.ResponseType.ACCEPT,
+                             Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL))
         self.set_position(Gtk.WindowPosition.CENTER_ALWAYS)
         self.set_title(APP)
         # self.set_icon_from_file(comun.ICON)
@@ -128,7 +135,14 @@ class LoginDialog(Gtk.Dialog):
             Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         self.scrolledwindow1.set_shadow_type(Gtk.ShadowType.IN)
         hbox1.pack_start(self.scrolledwindow1, True, True, 0)
-        #
+        self.hbox2 = Gtk.HBox()
+        vbox.pack_start(self.hbox2, True, True, 0)
+        self.hbox2.pack_start(Gtk.Label(_('Insert PIN')+':'),
+                              True,
+                              True,
+                              0)
+        self.pincode = Gtk.Entry()
+        self.hbox2.pack_start(self.pincode, True, True, 0)
         self.viewer = WebKit.WebView()
         self.scrolledwindow1.add(self.viewer)
         self.scrolledwindow1.set_size_request(600, 600)
@@ -144,16 +158,16 @@ class LoginDialog(Gtk.Dialog):
     def on_navigation_requested(self, view, frame, req, nav, pol):
         try:
             uri = req.get_uri()
-            print(uri)
-            pos = uri.find('https://localhost/?code=')
+            print('---', uri, '---')
+            pos = uri.find('https://api.twitter.com/oauth/authorize')
             if pos > -1:
                 self.code = uri[24:]
-                self.hide()
+                # self.hide()
         except Exception as e:
             print(e)
             print('Error')
 
-# class ImgurDialog(Gtk.Dialog):
+# class twitterDialog(Gtk.Dialog):
 
 
 class IdleObject(GObject.GObject):
@@ -288,11 +302,11 @@ class Progreso(Gtk.Dialog, IdleObject):
         self.label.set_text(_('Sending: %s') % element)
 
 
-class ImgurDialog(Gtk.Dialog):
+class twitterDialog(Gtk.Dialog):
 
-    def __init__(self, parent):
+    def __init__(self, parent, fileimage):
         Gtk.Dialog.__init__(self,
-                            _('Send images to Imgur'),
+                            _('Send images to twitter'),
                             parent,
                             Gtk.DialogFlags.MODAL |
                             Gtk.DialogFlags.DESTROY_WITH_PARENT,
@@ -308,37 +322,120 @@ class ImgurDialog(Gtk.Dialog):
         grid.set_row_spacing(5)
         frame.add(grid)
         self.get_content_area().add(frame)
-        label = Gtk.Label(_('Name')+' :')
+        label = Gtk.Label(_('Tweet')+' :')
         label.set_xalign(0)
         grid.attach(label, 0, 0, 1, 1)
-        self.name = Gtk.Entry()
-        self.name.set_width_chars(50)
-        grid.attach(self.name, 1, 0, 1, 1)
-        label = Gtk.Label(_('Title')+' :')
-        label.set_xalign(0)
-        grid.attach(label, 0, 1, 1, 1)
-        self.title = Gtk.Entry()
-        grid.attach(self.title, 1, 1, 1, 1)
-        label = Gtk.Label(_('Description')+' :')
-        label.set_xalign(0)
-        grid.attach(label, 0, 2, 1, 1)
+        self.tweet_length = Gtk.Label()
+        grid.attach(self.tweet_length, 1, 0, 1, 1)
         scrolledwindow = Gtk.ScrolledWindow()
         scrolledwindow.set_shadow_type(Gtk.ShadowType.ETCHED_IN)
         scrolledwindow.set_hexpand(True)
         scrolledwindow.set_vexpand(True)
-        grid.attach(scrolledwindow, 0, 3, 2, 2)
-        self.description = Gtk.TextView()
-        scrolledwindow.add(self.description)
+        grid.attach(scrolledwindow, 0, 1, 2, 2)
+        self.tweet_text = Gtk.TextView()
+        self.tweet_text.set_wrap_mode(Gtk.WrapMode.WORD)
+        self.tweet_text.connect('key-release-event', self.on_insert_at_cursor)
+        scrolledwindow.add(self.tweet_text)
+        scrolledwindow.set_size_request(600, 60)
+        label = Gtk.Label(_('Image')+' :')
+        label.set_xalign(0)
+        grid.attach(label, 0, 3, 1, 1)
+        button = Gtk.Button(_('Load image'))
+        button.connect('clicked', self.on_button_clicked)
+        grid.attach(button, 1, 3, 1, 1)
+        self.scrolledwindow1 = Gtk.ScrolledWindow()
+        self.scrolledwindow1.set_shadow_type(Gtk.ShadowType.ETCHED_IN)
+        self.scrolledwindow1.set_hexpand(True)
+        self.scrolledwindow1.set_vexpand(True)
+        grid.attach(self.scrolledwindow1, 0, 4, 2, 2)
+        self.tweet_image = Gtk.Image()
+        self.scrolledwindow1.add(self.tweet_image)
+        self.scrolledwindow1.set_size_request(600, 400)
+
+        self.load_image(fileimage)
+
         self.show_all()
 
-    def get_name(self):
-        return self.name.get_text()
+    def update_preview_cb(self, file_chooser, preview):
+        filename = file_chooser.get_preview_filename()
+        try:
+            pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_size(filename, 128, 128)
+            preview.set_from_pixbuf(pixbuf)
+            have_preview = True
+        except:
+            have_preview = False
+        file_chooser.set_preview_widget_active(have_preview)
+        return
 
-    def get_title(self):
-        return self.title.get_text()
+    def on_button_clicked(self, widget):
+        dialog = Gtk.FileChooserDialog(_(
+            'Select one or more images to upload to Picasa Web'),
+            self,
+            Gtk.FileChooserAction.OPEN,
+            (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+             Gtk.STOCK_OPEN, Gtk.ResponseType.OK))
+        dialog.set_default_response(Gtk.ResponseType.OK)
+        dialog.set_select_multiple(True)
+        dialog.set_current_folder(os.getenv('HOME'))
+        filter = Gtk.FileFilter()
+        filter.set_name(_('Imagenes'))
+        filter.add_mime_type('image/png')
+        filter.add_mime_type('image/jpeg')
+        filter.add_mime_type('image/gif')
+        filter.add_mime_type('image/x-ms-bmp')
+        filter.add_mime_type('image/x-icon')
+        filter.add_mime_type('image/tiff')
+        filter.add_mime_type('image/x-photoshop')
+        filter.add_mime_type('x-portable-pixmap')
+        filter.add_pattern('*.png')
+        filter.add_pattern('*.jpg')
+        filter.add_pattern('*.gif')
+        filter.add_pattern('*.bmp')
+        filter.add_pattern('*.ico')
+        filter.add_pattern('*.tiff')
+        filter.add_pattern('*.psd')
+        filter.add_pattern('*.ppm')
+        dialog.add_filter(filter)
+        preview = Gtk.Image()
+        dialog.set_preview_widget(preview)
+        dialog.connect('update-preview', self.update_preview_cb, preview)
+        response = dialog.run()
+        if response == Gtk.ResponseType.OK:
+            filenames = dialog.get_filenames()
+            if len(filenames) > 0:
+                self.load_image(filenames[0])
+        dialog.destroy()
 
-    def get_description(self):
-        textbuffer = self.description.get_buffer()
+    def load_image(self, image):
+        self.fileimage = image
+        pixbuf = GdkPixbuf.Pixbuf.new_from_file(self.fileimage)
+        w = pixbuf.get_width()
+        h = pixbuf.get_height()
+        sw, sh = self.scrolledwindow1.get_size_request()
+        zw = float(w)/float(sw)
+        zh = float(h)/float(sh)
+        if zw > zh:
+            z = zw
+        else:
+            z = zh
+        if z > 1:
+            pixbuf = pixbuf.scale_simple(
+                w/z, h/z,  GdkPixbuf.InterpType.BILINEAR)
+        print(zw, zh)
+        self.tweet_image.set_from_pixbuf(pixbuf)
+
+    def on_insert_at_cursor(self, widget, event):
+        tweet_length = 140 - len(self.get_tweet_text())
+        if tweet_length < 0:
+            color = 'red'
+        else:
+            color = 'black'
+        tweet_length = _('Chars left') + ': ' + str(tweet_length)
+        tl = '<span foreground="%s">%s</span>' % (color, tweet_length)
+        self.tweet_length.set_markup(tl)
+
+    def get_tweet_text(self):
+        textbuffer = self.tweet_text.get_buffer()
         return textbuffer.get_text(textbuffer.get_start_iter(),
                                    textbuffer.get_end_iter(),
                                    True)
@@ -351,20 +448,19 @@ def get_duration(file_in):
 def get_files(files_in):
     files = []
     for file_in in files_in:
-        print(file_in)
         file_in = unquote_plus(file_in.get_uri()[7:])
         if os.path.isfile(file_in):
             files.append(file_in)
     return files
 
 
-class ImgurUploaderMenuProvider(GObject.GObject, FileManager.MenuProvider):
+class twitterUploaderMenuProvider(GObject.GObject, FileManager.MenuProvider):
 
     def __init__(self):
         self.token = Token()
-        self.access_token = self.token.get('access_token')
-        self.refresh_token = self.token.get('refresh_token')
-        if len(self.access_token) == 0 or len(self.refresh_token) == 0:
+        self.access_token_key = token.get('access_token_key')
+        self.access_token_secret = token.get('access_token_secret')
+        if len(access_token_key) == 0 or len(access_token_secret) == 0:
             self.is_login = False
         else:
             self.is_login = True
@@ -381,7 +477,7 @@ class ImgurUploaderMenuProvider(GObject.GObject, FileManager.MenuProvider):
         files = get_files(selected)
         if len(files) > 0:
             if len(files) == 1:
-                imd = ImgurDialog(None)
+                imd = twitterDialog(window)
                 if imd.run() == Gtk.ResponseType.ACCEPT:
                     imd.destroy()
                     config = {
@@ -394,13 +490,13 @@ class ImgurUploaderMenuProvider(GObject.GObject, FileManager.MenuProvider):
                     return
             else:
                 config = None
-            self.client = ImgurClient(CLIENT_ID,
+            self.client = twitterClient(CLIENT_ID,
                                       CLIENT_SECTRET,
                                       self.access_token,
                                       self.refresh_token)
 
             diib = DoItInBackground(files, self.client, config)
-            progreso = Progreso(_('Send files to Imgur'), window, len(files))
+            progreso = Progreso(_('Send files to twitter'), window, len(files))
             diib.connect('started', progreso.set_max_value)
             diib.connect('start_one', progreso.set_element)
             diib.connect('end_one', progreso.increase)
@@ -409,8 +505,8 @@ class ImgurUploaderMenuProvider(GObject.GObject, FileManager.MenuProvider):
             diib.start()
             progreso.run()
 
-    def login_to_imgur(self, menu, window):
-        client = ImgurClient(CLIENT_ID, CLIENT_SECTRET)
+    def login_to_twitter(self, menu, window):
+        client = twitterClient(CLIENT_ID, CLIENT_SECTRET)
         authorization_url = client.get_auth_url('code')
         ld = LoginDialog(authorization_url, window)
         ld.run()
@@ -419,19 +515,19 @@ class ImgurUploaderMenuProvider(GObject.GObject, FileManager.MenuProvider):
                 'client_secret': CLIENT_SECTRET,
                 'code': ld.code,
                 'grant_type': 'authorization_code'}
-        token_url = 'https://api.imgur.com/oauth2/token'
+        token_url = 'https://api.twitter.com/oauth2/token'
         response = session.request('POST', token_url, data=data)
         if response is not None and response.status_code == 200 and\
                 response.text is not None and len(response.text) > 0:
             ans = json.loads(response.text)
             self.access_token = ans['access_token']
             self.refresh_token = ans['refresh_token']
-            token.set('access_token', access_token)
-            token.set('refresh_token', refresh_token)
+            token.set('access_token', self.access_token)
+            token.set('refresh_token', self.refresh_token)
             token.save()
             self.is_login = True
 
-    def unlogin_from_imgur(self, menu):
+    def unlogin_from_twitter(self, menu):
         self.token.clear()
         self.access_token = ''
         self.refresh_token = ''
@@ -439,56 +535,52 @@ class ImgurUploaderMenuProvider(GObject.GObject, FileManager.MenuProvider):
 
     def get_file_items(self, window, sel_items):
         top_menuitem = FileManager.MenuItem(
-            name='ImgurUploaderMenuProvider::Gtk-imgur-top',
-            label=_('Send to Imgur...'),
-            tip=_('Send images to Imgur'))
+            name='twitterUploaderMenuProvider::Gtk-twitter-top',
+            label=_('Send to twitter...'),
+            tip=_('Send images to twitter'))
         submenu = FileManager.Menu()
         top_menuitem.set_submenu(submenu)
-        if self.all_files_are_images(sel_items):
-            sub_menuitem_00 = FileManager.MenuItem(
-                name='ImgurUploaderMenuProvider::Gtk-imgur-sub-00',
-                label=_('Send...'),
-                tip='Send images to Imgur')
-            sub_menuitem_00.connect('activate', self.send_images, sel_items,
-                                    window)
-            submenu.append_item(sub_menuitem_00)
-        if self.is_login:
+
+        sub_menuitem_00 = FileManager.MenuItem(
+            name='twitterUploaderMenuProvider::Gtk-twitter-sub-00',
+            label=_('Send...'),
+            tip='Send images to twitter')
+        sub_menuitem_00.connect('activate', self.send_images, sel_items,
+                                window)
+        submenu.append_item(sub_menuitem_00)
+        if self.all_files_are_images(sel_items) and self.is_login:
             sub_menuitem_00.set_property('sensitive', True)
-            sub_menuitem_01 = FileManager.MenuItem(
-                name='ImgurUploaderMenuProvider::Gtk-imgur-sub-01',
-                label=_('Unlogin from Imgur'),
-                tip='Unlogin from Imgur')
-            sub_menuitem_01.connect('activate', self.unlogin_from_imgur)
-            submenu.append_item(sub_menuitem_01)
         else:
             sub_menuitem_00.set_property('sensitive', False)
+        if self.is_login:
             sub_menuitem_01 = FileManager.MenuItem(
-                name='ImgurUploaderMenuProvider::Gtk-imgur-sub-01',
-                label=_('Login to Imgur'),
-                tip='Login to Imgur to send images')
-            sub_menuitem_01.connect('activate', self.login_to_imgur, window)
-            submenu.append_item(sub_menuitem_01)
+                name='twitterUploaderMenuProvider::Gtk-twitter-sub-01',
+                label=_('Unlogin from twitter'),
+                tip='Unlogin from twitter')
+            sub_menuitem_01.connect('activate', self.unlogin_from_twitter)
+        else:
+            sub_menuitem_01 = FileManager.MenuItem(
+                name='twitterUploaderMenuProvider::Gtk-twitter-sub-01',
+                label=_('Login to twitter'),
+                tip='Login to twitter to send images')
+            sub_menuitem_01.connect('activate', self.login_to_twitter, window)
+        submenu.append_item(sub_menuitem_01)
 
         sub_menuitem_02 = FileManager.MenuItem(
-            name='ImgurUploaderMenuProvider::Gtk-imgur-sub-02',
-            label=SEPARATOR)
-        submenu.append_item(sub_menuitem_02)
-
-        sub_menuitem_03 = FileManager.MenuItem(
-            name='ImgurUploaderMenuProvider::Gtk-imgur-sub-03',
+            name='twitterUploaderMenuProvider::Gtk-twitter-sub-02',
             label=_('About'),
             tip=_('About'))
-        sub_menuitem_03.connect('activate', self.about)
-        submenu.append_item(sub_menuitem_03)
+        sub_menuitem_02.connect('activate', self.about, window)
+        submenu.append_item(sub_menuitem_02)
 
         return top_menuitem,
 
-    def about(self, widget):
-        ad = Gtk.AboutDialog()
+    def about(self, widget, window):
+        ad = Gtk.AboutDialog(parent=window)
         ad.set_name(APPNAME)
         ad.set_version(VERSION)
         ad.set_copyright('Copyrignt (c) 2016\nLorenzo Carbonell')
-        ad.set_comments(_('nautilus-imgur-uploader'))
+        ad.set_comments(_('nautilus-twitter-uploader'))
         ad.set_license('''
 This program is free software: you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -514,46 +606,93 @@ this program. If not, see <http://www.gnu.org/licenses/>.
         ad.destroy()
 
 
+def tweet(twitterAPI, text, image=None):
+    if image is None:
+        if text is None or len(text) == 0:
+            return False
+        try:
+            r = api.request('statuses/update', {'status': text})
+            if r.status_code == 200:
+                return True
+        except Exception as e:
+            print(e)
+    else:
+        file = open(image, 'rb')
+        data = file.read()
+        try:
+            r = twitterAPI.request('statuses/update_with_media',
+                                   {'status': text},
+                                   {'media[]': data})
+            if r.status_code == 200:
+                return True
+        except Exception as e:
+            print(e)
+    return False
+
+
+def oauth(window=None):
+    token = Token()
+    access_token_key = token.get('access_token_key')
+    access_token_secret = token.get('access_token_secret')
+    if len(access_token_key) == 0 or len(access_token_secret) == 0:
+        try:
+            oauth_client = OAuth1Session(CLIENT_ID,
+                                         client_secret=CLIENT_SECTRET,
+                                         callback_uri='oob')
+            resp = oauth_client.fetch_request_token(REQUEST_TOKEN_URL)
+        except ValueError as e:
+            print(e)
+            return None
+        url = oauth_client.authorization_url(AUTHORIZATION_URL)
+        ld = LoginDialog(url, window)
+        if ld.run() == Gtk.ResponseType.ACCEPT:
+            pincode = ld.pincode.get_text()
+            ld.destroy()
+            if len(pincode) > 0:
+                oauth_client = OAuth1Session(
+                    CLIENT_ID,
+                    client_secret=CLIENT_SECTRET,
+                    resource_owner_key=resp.get('oauth_token'),
+                    resource_owner_secret=resp.get('oauth_token_secret'),
+                    verifier=pincode)
+                try:
+                    resp = oauth_client.fetch_access_token(ACCESS_TOKEN_URL)
+                except ValueError as e:
+                    print(e)
+                    ld.destroy()
+                    return None
+                token.set('access_token_key',
+                          resp.get('oauth_token'))
+                token.set('access_token_secret',
+                          resp.get('oauth_token_secret'))
+                token.save()
+                twitterAPI = TwitterAPI(CLIENT_ID,
+                                        CLIENT_SECTRET,
+                                        resp.get('oauth_token'),
+                                        resp.get('oauth_token_secret'))
+                return twitterAPI
+        ld.destroy()
+    else:
+        twitterAPI = TwitterAPI(CLIENT_ID,
+                                CLIENT_SECTRET,
+                                access_token_key,
+                                access_token_secret)
+        return twitterAPI
+    return None
+
+
 if __name__ == '__main__':
     '''
-    import requests
-    token = Token()
-    access_token = token.get('access_token')
-    refresh_token = token.get('refresh_token')
-    if len(access_token) == 0 or len(refresh_token) == 0:
-        client = ImgurClient(CLIENT_ID, CLIENT_SECTRET)
-        authorization_url = client.get_auth_url('code')
-        ld = LoginDialog(authorization_url, None)
-        ld.run()
-        session = requests.session()
-        data = {'client_id': CLIENT_ID,
-                'client_secret': CLIENT_SECTRET,
-                'code': ld.code,
-                'grant_type': 'authorization_code'}
-        token_url = 'https://api.imgur.com/oauth2/token'
-        response = session.request('POST', token_url, data=data)
-        if response is not None and response.status_code == 200 and\
-                response.text is not None and len(response.text) > 0:
-            ans = json.loads(response.text)
-            access_token = ans['access_token']
-            refresh_token = ans['refresh_token']
-            token.set('access_token', access_token)
-            token.set('refresh_token', refresh_token)
-            token.save()
-    client = ImgurClient(CLIENT_ID, CLIENT_SECTRET, access_token,
-                         refresh_token)
-    print('client', client.auth)
-    config = {
-            'album': None,
-            'name':  'Catastrophe!',
-            'title': 'Catastrophe!',
-            'description': 'Cute kitten being cute on'}
-
-    with open('/home/lorenzo/Escritorio/nautilus.jpg', 'rb') as fd:
-        print(client.upload(fd, config=config, anon=False))
+    twitterAPI = oauth()
+    print(twitterAPI)
+    if twitterAPI is not None:
+        tweet(
+            twitterAPI,
+            '/home/lorenzo/Escritorio/nautilus-twitter-uploader-reduced.png',
+            'Test from nautilus-twitter-uploader')
+    exit(1)
     '''
-    imd = ImgurDialog(None)
-    if imd.run() == Gtk.ResponseType.ACCEPT:
-        print(imd.get_name())
-        print(imd.get_title())
-        print(imd.get_description())
+    image = '/home/lorenzo/Escritorio/nautilus-twitter-uploader-reduced.png'
+    td = twitterDialog(None, image)
+    if td.run() == Gtk.ResponseType.ACCEPT:
+        print(td.get_tweet_text())

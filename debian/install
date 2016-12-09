@@ -1,6 +1,3 @@
-src/nautilus-imgur-uploader.py /usr/share/nautilus-python/extensions
-data/nautilus-imgur-uploader.svg /usr/share/icons/gnome/scalable/apps
-src/imgurpython/*.py /usr/share/nautilus-python/extensions/imgurpython
-src/imgurpython/helpers/*.py /usr/share/nautilus-python/extensions/imgurpython/helpers
-src/imgurpython/imgur/*.py /usr/share/nautilus-python/extensions/imgurpython/imgur
-src/imgurpython/imgur/models/*.py /usr/share/nautilus-python/extensions/imgurpython/imgur/models
+src/nautilus-twitter-uploader.py /usr/share/nautilus-python/extensions
+data/nautilus-twitter-uploader.svg /usr/share/icons/gnome/scalable/apps
+src/twitter/*.py /usr/share/nautilus-python/extensions/twitter

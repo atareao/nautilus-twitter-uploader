@@ -190,12 +190,12 @@ class DoItInBackground(IdleObject, Thread):
         'end_one': (GObject.SIGNAL_RUN_FIRST, GObject.TYPE_NONE, (float,)),
     }
 
-    def __init__(self, elements, client, config=None):
+    def __init__(self, elements, twitterAPI, tweet_text):
         IdleObject.__init__(self)
         Thread.__init__(self)
         self.elements = elements
-        self.client = client
-        self.config = config
+        self.twitterAPI = twitterAPI
+        self.tweet_text = tweet_text
         self.stopit = False
         self.ok = False
         self.daemon = True
@@ -204,8 +204,7 @@ class DoItInBackground(IdleObject, Thread):
         self.stopit = True
 
     def send_file(self, file_in):
-        with open(file_in, 'rb') as fd:
-            self.client.upload(fd, config=self.config, anon=False)
+        tweet(self.twitterAPI, self.tweet_text, file_in)
 
     def run(self):
         total = 0
@@ -457,9 +456,9 @@ def get_files(files_in):
 class twitterUploaderMenuProvider(GObject.GObject, FileManager.MenuProvider):
 
     def __init__(self):
-        self.token = Token()
-        self.access_token_key = token.get('access_token_key')
-        self.access_token_secret = token.get('access_token_secret')
+        token = Token()
+        access_token_key = token.get('access_token_key')
+        access_token_secret = token.get('access_token_secret')
         if len(access_token_key) == 0 or len(access_token_secret) == 0:
             self.is_login = False
         else:
@@ -477,25 +476,17 @@ class twitterUploaderMenuProvider(GObject.GObject, FileManager.MenuProvider):
         files = get_files(selected)
         if len(files) > 0:
             if len(files) == 1:
-                imd = twitterDialog(window)
-                if imd.run() == Gtk.ResponseType.ACCEPT:
-                    imd.destroy()
-                    config = {
-                            'album': None,
-                            'name': imd.get_name(),
-                            'title': imd.get_title(),
-                            'description': imd.get_description()}
+                td = twitterDialog(window)
+                if td.run() == Gtk.ResponseType.ACCEPT:
+                    tweet_text = td.get_tweet_text()
+                    td.destroy()
                 else:
-                    imd.destroy()
+                    td.destroy()
                     return
             else:
-                config = None
-            self.client = twitterClient(CLIENT_ID,
-                                      CLIENT_SECTRET,
-                                      self.access_token,
-                                      self.refresh_token)
-
-            diib = DoItInBackground(files, self.client, config)
+                tweet_text = ''
+            twitterAPI = oauth()
+            diib = DoItInBackground(files, twitterAPI, tweet_text)
             progreso = Progreso(_('Send files to twitter'), window, len(files))
             diib.connect('started', progreso.set_max_value)
             diib.connect('start_one', progreso.set_element)
@@ -506,31 +497,14 @@ class twitterUploaderMenuProvider(GObject.GObject, FileManager.MenuProvider):
             progreso.run()
 
     def login_to_twitter(self, menu, window):
-        client = twitterClient(CLIENT_ID, CLIENT_SECTRET)
-        authorization_url = client.get_auth_url('code')
-        ld = LoginDialog(authorization_url, window)
-        ld.run()
-        session = requests.session()
-        data = {'client_id': CLIENT_ID,
-                'client_secret': CLIENT_SECTRET,
-                'code': ld.code,
-                'grant_type': 'authorization_code'}
-        token_url = 'https://api.twitter.com/oauth2/token'
-        response = session.request('POST', token_url, data=data)
-        if response is not None and response.status_code == 200 and\
-                response.text is not None and len(response.text) > 0:
-            ans = json.loads(response.text)
-            self.access_token = ans['access_token']
-            self.refresh_token = ans['refresh_token']
-            token.set('access_token', self.access_token)
-            token.set('refresh_token', self.refresh_token)
-            token.save()
+        twitterAPI = oauth(window)
+        if twitterAPI is not None:
             self.is_login = True
+        else:
+            self.is_login = False
 
     def unlogin_from_twitter(self, menu):
         self.token.clear()
-        self.access_token = ''
-        self.refresh_token = ''
         self.is_login = False
 
     def get_file_items(self, window, sel_items):

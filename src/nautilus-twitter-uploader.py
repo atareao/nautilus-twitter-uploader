@@ -3,7 +3,7 @@
 #
 # This file is part of nautilus-twitter-uploader
 #
-# Copyright (C) 2016 Lorenzo Carbonell
+# Copyright (C) 2016 - 2018 Lorenzo Carbonell
 # lorenzo.carbonell.cerezo@gmail.com
 #
 # This program is free software: you can redistribute it and/or modify
@@ -31,10 +31,6 @@ except Exception as e:
     print(e)
     exit(-1)
 import os
-import subprocess
-import shlex
-import tempfile
-import shutil
 from threading import Thread
 from urllib import unquote_plus
 from gi.repository import GObject
@@ -47,7 +43,6 @@ from TwitterAPI import TwitterAPI
 from requests_oauthlib import OAuth1Session
 import json
 import codecs
-import requests
 
 APP = 'nautilus-twitter-uploader'
 APPNAME = 'nautilus-twitter-uploader'
@@ -66,9 +61,7 @@ AUTHORIZATION_URL = 'https://api.twitter.com/oauth/authorize'
 SIGNIN_URL = 'https://api.twitter.com/oauth/authenticate'
 EXTENSIONS_FROM = ['.bmp', '.eps', '.gif', '.jpg', '.pcx', '.png', '.ppm',
                    '.tif', '.tiff', '.webp']
-PARAMS = {
-        'access_token_key': '',
-        'access_token_secret': ''}
+PARAMS = {'access_token_key': '', 'access_token_secret': ''}
 _ = str
 
 
@@ -108,7 +101,7 @@ class Token(object):
         f.close()
 
     def clear(self):
-        self.paramas = PARAMS
+        self.params = PARAMS
         self.save()
 
 
@@ -137,7 +130,7 @@ class LoginDialog(Gtk.Dialog):
         hbox1.pack_start(self.scrolledwindow1, True, True, 0)
         self.hbox2 = Gtk.HBox()
         vbox.pack_start(self.hbox2, True, True, 0)
-        self.hbox2.pack_start(Gtk.Label(_('Insert PIN')+':'),
+        self.hbox2.pack_start(Gtk.Label(_('Insert PIN') + ':'),
                               True,
                               True,
                               0)
@@ -221,6 +214,7 @@ class DoItInBackground(IdleObject, Thread):
                 self.send_file(element)
                 self.emit('end_one', get_duration(element))
         except Exception as e:
+            print(e)
             self.ok = False
         self.emit('ended', self.ok)
 
@@ -292,7 +286,7 @@ class Progreso(Gtk.Dialog, IdleObject):
 
     def increase(self, anobject, value):
         self.value += float(value)
-        fraction = self.value/self.max_value
+        fraction = self.value / self.max_value
         self.progressbar.set_fraction(fraction)
         if self.value >= self.max_value:
             self.hide()
@@ -321,7 +315,7 @@ class twitterDialog(Gtk.Dialog):
         grid.set_row_spacing(5)
         frame.add(grid)
         self.get_content_area().add(frame)
-        label = Gtk.Label(_('Tweet')+' :')
+        label = Gtk.Label(_('Tweet') + ' :')
         label.set_xalign(0)
         grid.attach(label, 0, 0, 1, 1)
         self.tweet_length = Gtk.Label()
@@ -336,12 +330,12 @@ class twitterDialog(Gtk.Dialog):
         self.tweet_text.connect('key-release-event', self.on_insert_at_cursor)
         scrolledwindow.add(self.tweet_text)
         scrolledwindow.set_size_request(600, 60)
-        label = Gtk.Label(_('Image')+' :')
+        label = Gtk.Label(_('Image') + ' :')
         label.set_xalign(0)
         grid.attach(label, 0, 3, 1, 1)
-        button = Gtk.Button(_('Load image'))
-        button.connect('clicked', self.on_button_clicked)
-        grid.attach(button, 1, 3, 1, 1)
+        # button = Gtk.Button(_('Load image'))
+        # button.connect('clicked', self.on_button_clicked)
+        # grid.attach(button, 1, 3, 1, 1)
         self.scrolledwindow1 = Gtk.ScrolledWindow()
         self.scrolledwindow1.set_shadow_type(Gtk.ShadowType.ETCHED_IN)
         self.scrolledwindow1.set_hexpand(True)
@@ -361,7 +355,8 @@ class twitterDialog(Gtk.Dialog):
             pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_size(filename, 128, 128)
             preview.set_from_pixbuf(pixbuf)
             have_preview = True
-        except:
+        except Exception as e:
+            print(e)
             have_preview = False
         file_chooser.set_preview_widget_active(have_preview)
         return
@@ -411,15 +406,15 @@ class twitterDialog(Gtk.Dialog):
         w = pixbuf.get_width()
         h = pixbuf.get_height()
         sw, sh = self.scrolledwindow1.get_size_request()
-        zw = float(w)/float(sw)
-        zh = float(h)/float(sh)
+        zw = float(w) / float(sw)
+        zh = float(h) / float(sh)
         if zw > zh:
             z = zw
         else:
             z = zh
         if z > 1:
-            pixbuf = pixbuf.scale_simple(
-                w/z, h/z,  GdkPixbuf.InterpType.BILINEAR)
+            pixbuf = pixbuf.scale_simple(w / z, h / z,
+                                         GdkPixbuf.InterpType.BILINEAR)
         print(zw, zh)
         self.tweet_image.set_from_pixbuf(pixbuf)
 
@@ -476,7 +471,7 @@ class twitterUploaderMenuProvider(GObject.GObject, FileManager.MenuProvider):
         files = get_files(selected)
         if len(files) > 0:
             if len(files) == 1:
-                td = twitterDialog(window)
+                td = twitterDialog(window, files[0])
                 if td.run() == Gtk.ResponseType.ACCEPT:
                     tweet_text = td.get_tweet_text()
                     td.destroy()
@@ -504,7 +499,8 @@ class twitterUploaderMenuProvider(GObject.GObject, FileManager.MenuProvider):
             self.is_login = False
 
     def unlogin_from_twitter(self, menu):
-        self.token.clear()
+        token = Token()
+        token.clear()
         self.is_login = False
 
     def get_file_items(self, window, sel_items):
@@ -585,7 +581,7 @@ def tweet(twitterAPI, text, image=None):
         if text is None or len(text) == 0:
             return False
         try:
-            r = api.request('statuses/update', {'status': text})
+            r = twitterAPI.request('statuses/update', {'status': text})
             if r.status_code == 200:
                 return True
         except Exception as e:

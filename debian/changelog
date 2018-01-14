@@ -1,9 +1,16 @@
-nautilus-twitter-uploader (0.2.0-0extras16.04.0) xenial; urgency=medium
+nautilus-twitter-uploader (0.2.1-0extras16.04.0) xenial; urgency=medium
+
+  * Fixed minor bugs
+  * Clean code
+
+ -- Lorenzo Carbonell <lorenzo.carbonell.cerezo@gmail.com>  Sun, 14 Jan 2018 18:19:25 +0100
+
+nautilus-twitter-uploader (0.2.0-0extras16.04.5) xenial; urgency=medium
 
   * Changed icon
   * Fixed bug
 
- -- Lorenzo Carbonell <lorenzo.carbonell.cerezo@gmail.com>  Fri, 09 Dec 2016 23:17:40 +0100
+ -- Lorenzo Carbonell <lorenzo.carbonell.cerezo@gmail.com>  Tue, 02 May 2017 07:08:25 +0200
 
 nautilus-twitter-uploader (0.1.0-0extras16.04.0) xenial; urgency=medium
 

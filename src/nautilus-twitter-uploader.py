@@ -48,6 +48,7 @@ APP = 'nautilus-twitter-uploader'
 APPNAME = 'nautilus-twitter-uploader'
 ICON = 'nautilus-twitter-uploader'
 VERSION = '0.1.0'
+MAX_NUMBER_OF_CHARS = 280
 
 CONFIG_DIR = os.path.join(os.path.expanduser('~'), '.config')
 CONFIG_APP_DIR = os.path.join(CONFIG_DIR, APP)
@@ -419,7 +420,7 @@ class twitterDialog(Gtk.Dialog):
         self.tweet_image.set_from_pixbuf(pixbuf)
 
     def on_insert_at_cursor(self, widget, event):
-        tweet_length = 140 - len(self.get_tweet_text())
+        tweet_length = MAX_NUMBER_OF_CHARS - len(self.get_tweet_text())
         if tweet_length < 0:
             color = 'red'
         else:

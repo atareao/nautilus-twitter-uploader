@@ -1,3 +1,9 @@
+nautilus-twitter-uploader (0.2.2-0extras16.04.0) xenial; urgency=medium
+
+  * Changed max number of characters for Twitter
+
+ -- Lorenzo Carbonell <lorenzo.carbonell.cerezo@gmail.com>  Mon, 15 Jan 2018 08:01:24 +0100
+
 nautilus-twitter-uploader (0.2.1-0extras16.04.0) xenial; urgency=medium
 
   * Fixed minor bugs
